@@ -1,0 +1,23 @@
+# Naming conventions for the AutoFE framework
+# Library: AutoFE
+# Version: 1.0.0
+# ------------------------------------------
+
+## 1. Class naming rules
+# --------------------------------------------
+
+### 1.1 Base Classes
+Pattern: [Base][FeatureType]
+Example:
+  - BaseGenerator
+
+### 1.2 Feature Generators
+Pattern: [Action][FeatureType]Generator
+Example:
+  - AggregationFeatureGenerator
+
+### 1.3 Feature Transformers
+Pattern: [Method]Transformer
+Example:
+  - LogTransformer
+
