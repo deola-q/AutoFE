@@ -52,5 +52,3 @@ X_train_stats = stat_features.fit_transform(X_train_grouped, y_train)
 - numpy >= 1.19.0
 - pandas >= 1.2.0
 - scikit-learn >= 0.24.0
-
-**Made with ❤️ for automated machine learning**
