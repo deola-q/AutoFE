@@ -2,13 +2,13 @@
 
 ### Framework for automated feature generation based on statistics and AI tools
 
-[![PyPI version](https://badge.fury.io/py/autofe-vsu-project.svg)](https://pypi.org/project/autofe-vsu-project/)
+[![PyPI version](https://badge.fury.io/py/autofe-vsu-project.svg)](https://pypi.org/project/autofe-grass/)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
 ## Installation
 
 ```bash
-pip install autofe-vsu-project
+pip install autofe-grass
 ```
 
 ## Quick Start
@@ -22,20 +22,24 @@ df = pd.read_csv('your_data.csv')
 X_train, X_test, y_train, y_test = train_test_split(X, y)
 
 # Generate group-based features
-group_features = GroupAggregationFeatures(
-    numeric_cols=['age', 'fare'],
-    group_cols=['pclass', 'sex'],
-    aggs=['mean', 'std'],
-    add_deviation=True
+group_feats1 = GroupAggregationFeatures(
+        numeric_cols=numeric_cols,
+        group_cols=group_cols,
+        aggs=['mean', 'std' ...],  
+        add_deviations=True,
+        add_rank=False
 )
 X_train_grouped = group_features.fit_transform(X_train)
 
 # Generate statistical features
-stat_features = StatisticalFeatureGenerator(
-    numeric_cols=['age', 'fare'],
-    unary=['log', 'sqrt'],
-    pairwise=['diff']
-)
+stat_gen = StatisticalFeatureGenerator(
+        numeric_cols=numeric_cols,
+        unary=['log', 'sqrt'],
+        pairwise=['ratio', 'diff'],
+        max_features=20,
+        corr_th=0.95,
+        min_var=1e-5
+    )
 X_train_stats = stat_features.fit_transform(X_train_grouped, y_train)
 ```
 
@@ -43,7 +47,7 @@ X_train_stats = stat_features.fit_transform(X_train_grouped, y_train)
 
 - **Group Aggregations** - Mean, std, min, max, sum, count by categories
 - **Statistical Transforms** - Log, sqrt, ratio, difference between features
-- **Sklearn-Compatible** - Works with Pipeline, GridSearchCV
+- **Sklearn-Compatible** - Works with sklearn Pipeline
 
 
 ## 🔧 Requirements
