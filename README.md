@@ -43,6 +43,9 @@ stat_gen = StatisticalFeatureGenerator(
 X_train_stats = stat_features.fit_transform(X_train_grouped, y_train)
 ```
 
+## Learn more
+Usage examples: [!notebooks](https://github.com/deola-q/AutoFE/tree/4a68d8049083b571c559f1d226a0a5128730e9fc/notebooks)
+
 ## Key Features
 
 - **Group Aggregations** - Mean, std, min, max, sum, count by categories
