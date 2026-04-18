@@ -1,0 +1,15 @@
+LICENSE
+README.md
+setup.cfg
+setup.py
+autofe/__init__.py
+autofe/add_tools.py
+autofe/ai.py
+autofe/generators.py
+autofe/main.py
+autofe/stats.py
+autofe_grass.egg-info/PKG-INFO
+autofe_grass.egg-info/SOURCES.txt
+autofe_grass.egg-info/dependency_links.txt
+autofe_grass.egg-info/requires.txt
+autofe_grass.egg-info/top_level.txt

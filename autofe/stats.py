@@ -8,7 +8,6 @@ from sklearn.preprocessing import PowerTransformer
 from sklearn.feature_selection import mutual_info_regression
 
 
-
 class FeatureUtils:
     @staticmethod
     def safe_log(x):
@@ -17,13 +16,18 @@ class FeatureUtils:
     @staticmethod
     def safe_sqrt(x):
         return np.sqrt(np.clip(x, 0, None))
-
+    
+    @staticmethod
+    def safe_divide(num, denom, eps=1e-10):
+        """Безопасное деление с защитой от нуля и бесконечности"""
+        denom = denom.replace(0, np.nan).clip(lower=eps)
+        return num / denom
+    
     @staticmethod
     def check_columns(df, required):
         missing = set(required) - set(df.columns)
         if missing:
             raise ValueError(f"Missing columns: {missing}")
-
 
 
 class AutoFETBase(BaseEstimator, TransformerMixin):
@@ -34,28 +38,74 @@ class AutoFETBase(BaseEstimator, TransformerMixin):
 class GroupAggregationFeatures(AutoFETBase):
     
     DEFAULT_AGGS = [
-        "mean", 
-        "std", 
-        "min", 
-        "max", 
-        "median", 
-        "sum", 
-        "count"
+        "mean", "std", "min", "max", "median", "sum", "count"
     ]
-
+    
+    # Доступные типы отклонений
+    DEVIATION_TYPES = ["diff", "ratio", "zscore", "normalized", "proportion", "distance_to_boundary"]
+    
     def __init__(
         self,
         numeric_cols: List[str],
         group_cols: List[str],
         aggs: Union[str, List[str]] = "default",
-        add_deviation: bool = True,
+        add_deviations: Union[bool, List[str]] = True,      # True="all", False="none", или список ["mean", "median", "min", "max"]
+        add_ratios: Union[bool, List[str]] = True,          # True="all", False="none", или список ["mean", "median", "min", "max"]
+        deviation_types: List[str] = None,                  # ["diff", "ratio", "zscore", "normalized", "proportion", "distance_to_boundary"]
+        add_zscore: bool = False,                           # z-score = (x - mean)/std
+        add_normalized: bool = False,                       # (x - min)/(max - min)
+        add_proportion: bool = False,                       # доля от суммы
+        add_distance_to_boundary: bool = False,             # расстояние до min/max
         add_rank: bool = False,
+        add_cumulative: bool = False,                       # кумулятивные суммы/проценты
+        handle_infinity: str = "clip",                      # "clip", "drop", "fillna"
+        eps: float = 1e-10,                                 # для защиты от деления на ноль
     ):
         self.numeric_cols = numeric_cols
         self.group_cols = group_cols
         self.aggs = self.DEFAULT_AGGS if aggs == "default" else aggs
-        self.add_deviation = add_deviation
+        self.add_deviations = add_deviations
+        self.add_ratios = add_ratios
+        self.deviation_types = deviation_types or []
+        self.add_zscore = add_zscore
+        self.add_normalized = add_normalized
+        self.add_proportion = add_proportion
+        self.add_distance_to_boundary = add_distance_to_boundary
         self.add_rank = add_rank
+        self.add_cumulative = add_cumulative
+        self.handle_infinity = handle_infinity
+        self.eps = eps
+        
+        # Автоматически добавляем типы отклонений на основе флагов
+        if add_zscore and "zscore" not in self.deviation_types:
+            self.deviation_types.append("zscore")
+        if add_normalized and "normalized" not in self.deviation_types:
+            self.deviation_types.append("normalized")
+        if add_proportion and "proportion" not in self.deviation_types:
+            self.deviation_types.append("proportion")
+        if add_distance_to_boundary and "distance_to_boundary" not in self.deviation_types:
+            self.deviation_types.append("distance_to_boundary")
+            
+        # Если deviation_types пуст, но add_deviations или add_ratios активны,
+        # добавляем базовые типы
+        if not self.deviation_types and (self.add_deviations or self.add_ratios):
+            self.deviation_types = ["diff", "ratio"]
+        
+        # Определяем, для каких агрегаций создавать отклонения
+        if add_deviations is True:
+            self.deviation_base_cols = ["mean", "median", "min", "max"]
+        elif isinstance(add_deviations, list):
+            self.deviation_base_cols = add_deviations
+        else:
+            self.deviation_base_cols = []
+            
+        # Для отношений
+        if add_ratios is True:
+            self.ratio_base_cols = ["mean", "median", "min", "max", "sum"]
+        elif isinstance(add_ratios, list):
+            self.ratio_base_cols = add_ratios
+        else:
+            self.ratio_base_cols = []
 
     def fit(self, X: pd.DataFrame, y=None):
         FeatureUtils.check_columns(X, self.numeric_cols + self.group_cols)
@@ -66,7 +116,14 @@ class GroupAggregationFeatures(AutoFETBase):
         for agg in self.aggs:
             self.stats_[agg] = grouped[self.numeric_cols].agg(agg).reset_index()
         
-        self.global_mean_ = grouped[self.numeric_cols].mean().reset_index()
+        # Сохраняем также глобальные статистики для нормализации
+        self.global_stats_ = {
+            'min': X[self.numeric_cols].min(),
+            'max': X[self.numeric_cols].max(),
+            'mean': X[self.numeric_cols].mean(),
+            'std': X[self.numeric_cols].std()
+        }
+        
         self.is_fitted_ = True
         return self
 
@@ -74,14 +131,8 @@ class GroupAggregationFeatures(AutoFETBase):
         self._validate_is_fitted()
         df = X.copy()
         
-        # Store metadata as a separate dictionary if needed
         metadata_dict = {}
         feature_lineage_dict = {}
-        
-        if meta_usage:
-            # Initialize metadata structures as attributes of the DataFrame
-            # Using a wrapper approach - we'll return a tuple or add as attributes
-            pass
         
         # Групповые агрегации
         for agg, stats in self.stats_.items():
@@ -100,56 +151,215 @@ class GroupAggregationFeatures(AutoFETBase):
                         'group_cols': self.group_cols,
                         'transformer': 'GroupAggregationFeatures'
                     }
-                    
-                    # Отслеживаем lineage
                     if c not in feature_lineage_dict:
                         feature_lineage_dict[c] = []
                     feature_lineage_dict[c].append(col_name)
         
-        # Добавление отклонений
-        if self.add_deviation:
-            for c in self.numeric_cols:
-                mean_col = f"mean_{c}"
-                
-                # Разница
-                diff_col = f"diff_{c}"
-                df[diff_col] = df[c] - df[mean_col]
-                
-                # Отношение
-                ratio_col = f"ratio_{c}"
-                df[ratio_col] = df[c] / (df[mean_col].replace(0, np.nan).clip(lower=1e-10))
-                
-                if meta_usage:
-                    # Метаданные для diff
-                    metadata_dict[diff_col] = {
-                        'operation': 'difference',
-                        'base_column': c,
-                        'reference_column': mean_col,
-                        'type': 'deviation',
-                        'formula': f'{c} - {mean_col}',
-                        'transformer': 'GroupAggregationFeatures'
-                    }
+        # Добавление всех типов отклонений
+        for c in self.numeric_cols:
+            # Получаем все доступные агрегации для этой колонки
+            available_aggs = {}
+            for agg in self.aggs:
+                col_name = f"{agg}_{c}"
+                if col_name in df.columns:
+                    available_aggs[agg] = col_name
+            
+            # 1. Разности (diff)
+            if "diff" in self.deviation_types:
+                for base_agg in self.deviation_base_cols:
+                    if base_agg not in available_aggs:
+                        continue
                     
-                    # Метаданные для ratio
-                    metadata_dict[ratio_col] = {
-                        'operation': 'ratio',
-                        'base_column': c,
-                        'reference_column': mean_col,
-                        'type': 'deviation',
-                        'formula': f'{c} / {mean_col}',
-                        'transformer': 'GroupAggregationFeatures'
-                    }
+                    base_col = available_aggs[base_agg]
+                    diff_col = f"diff_{base_agg}_{c}"
+                    df[diff_col] = df[c] - df[base_col]
                     
-                    # Lineage
-                    if c not in feature_lineage_dict:
-                        feature_lineage_dict[c] = []
-                    feature_lineage_dict[c].extend([diff_col, ratio_col])
+                    # Обработка бесконечностей
+                    if self.handle_infinity == "clip":
+                        df[diff_col] = df[diff_col].clip(-1e10, 1e10)
+                    elif self.handle_infinity == "fillna":
+                        df[diff_col] = df[diff_col].fillna(0)
+                    
+                    if meta_usage:
+                        metadata_dict[diff_col] = {
+                            'operation': 'difference',
+                            'base_aggregation': base_agg,
+                            'base_column': c,
+                            'type': 'deviation',
+                            'formula': f'{c} - {base_agg}({c})',
+                            'transformer': 'GroupAggregationFeatures'
+                        }
+                        if c not in feature_lineage_dict:
+                            feature_lineage_dict[c] = []
+                        feature_lineage_dict[c].append(diff_col)
+            
+            # 2. Отношения (ratio)
+            if "ratio" in self.deviation_types:
+                for base_agg in self.ratio_base_cols:
+                    if base_agg not in available_aggs:
+                        continue
+                    
+                    base_col = available_aggs[base_agg]
+                    ratio_col = f"ratio_{base_agg}_{c}"
+                    df[ratio_col] = FeatureUtils.safe_divide(df[c], df[base_col], self.eps)
+                    
+                    if self.handle_infinity == "clip":
+                        df[ratio_col] = df[ratio_col].clip(0, 1e10)
+                    elif self.handle_infinity == "fillna":
+                        df[ratio_col] = df[ratio_col].fillna(1)
+                    
+                    if meta_usage:
+                        metadata_dict[ratio_col] = {
+                            'operation': 'ratio',
+                            'base_aggregation': base_agg,
+                            'base_column': c,
+                            'type': 'deviation',
+                            'formula': f'{c} / {base_agg}({c})',
+                            'transformer': 'GroupAggregationFeatures'
+                        }
+                        if c not in feature_lineage_dict:
+                            feature_lineage_dict[c] = []
+                        feature_lineage_dict[c].append(ratio_col)
+            
+            # 3. Z-score (стандартизованное отклонение)
+            if "zscore" in self.deviation_types:
+                if "mean" in available_aggs and "std" in available_aggs:
+                    mean_col = available_aggs["mean"]
+                    std_col = available_aggs["std"]
+                    zscore_col = f"zscore_{c}"
+                    df[zscore_col] = (df[c] - df[mean_col]) / df[std_col].clip(lower=self.eps)
+                    
+                    if self.handle_infinity == "clip":
+                        df[zscore_col] = df[zscore_col].clip(-10, 10)
+                    elif self.handle_infinity == "fillna":
+                        df[zscore_col] = df[zscore_col].fillna(0)
+                    
+                    if meta_usage:
+                        metadata_dict[zscore_col] = {
+                            'operation': 'zscore',
+                            'base_column': c,
+                            'type': 'normalization',
+                            'formula': f'({c} - mean({c})) / std({c})',
+                            'transformer': 'GroupAggregationFeatures'
+                        }
+                        if c not in feature_lineage_dict:
+                            feature_lineage_dict[c] = []
+                        feature_lineage_dict[c].append(zscore_col)
+            
+            # 4. Нормализованное значение в группе (0-1)
+            if "normalized" in self.deviation_types:
+                if "min" in available_aggs and "max" in available_aggs:
+                    min_col = available_aggs["min"]
+                    max_col = available_aggs["max"]
+                    range_col = f"range_{c}"
+                    normalized_col = f"normalized_{c}"
+                    
+                    # Сначала сохраняем размах
+                    df[range_col] = df[max_col] - df[min_col]
+                    # Нормализуем
+                    df[normalized_col] = (df[c] - df[min_col]) / df[range_col].clip(lower=self.eps)
+                    
+                    # Ограничиваем [0, 1]
+                    df[normalized_col] = df[normalized_col].clip(0, 1)
+                    
+                    if meta_usage:
+                        metadata_dict[normalized_col] = {
+                            'operation': 'normalized',
+                            'base_column': c,
+                            'type': 'normalization',
+                            'formula': f'({c} - min({c})) / (max({c}) - min({c}))',
+                            'transformer': 'GroupAggregationFeatures'
+                        }
+                        metadata_dict[range_col] = {
+                            'operation': 'range',
+                            'base_column': c,
+                            'type': 'auxiliary',
+                            'formula': f'max({c}) - min({c})',
+                            'transformer': 'GroupAggregationFeatures'
+                        }
+                        if c not in feature_lineage_dict:
+                            feature_lineage_dict[c] = []
+                        feature_lineage_dict[c].extend([normalized_col, range_col])
+            
+            # 5. Доля от суммы по группе
+            if "proportion" in self.deviation_types:
+                if "sum" in available_aggs:
+                    sum_col = available_aggs["sum"]
+                    proportion_col = f"proportion_{c}"
+                    df[proportion_col] = FeatureUtils.safe_divide(df[c], df[sum_col], self.eps)
+                    
+                    # Доля должна быть в [0, 1]
+                    df[proportion_col] = df[proportion_col].clip(0, 1)
+                    
+                    if meta_usage:
+                        metadata_dict[proportion_col] = {
+                            'operation': 'proportion',
+                            'base_column': c,
+                            'type': 'proportion',
+                            'formula': f'{c} / sum({c})',
+                            'transformer': 'GroupAggregationFeatures'
+                        }
+                        if c not in feature_lineage_dict:
+                            feature_lineage_dict[c] = []
+                        feature_lineage_dict[c].append(proportion_col)
+            
+            # 6. Расстояние до границ (min и max)
+            if "distance_to_boundary" in self.deviation_types:
+                if "min" in available_aggs and "max" in available_aggs:
+                    min_col = available_aggs["min"]
+                    max_col = available_aggs["max"]
+                    
+                    # Расстояние до минимума
+                    dist_to_min_col = f"dist_to_min_{c}"
+                    df[dist_to_min_col] = df[c] - df[min_col]
+                    
+                    # Расстояние до максимума
+                    dist_to_max_col = f"dist_to_max_{c}"
+                    df[dist_to_max_col] = df[max_col] - df[c]
+                    
+                    # Относительное расстояние до ближайшей границы
+                    range_col = df[max_col] - df[min_col]
+                    nearest_boundary_col = f"nearest_boundary_{c}"
+                    df[nearest_boundary_col] = np.minimum(
+                        df[dist_to_min_col], 
+                        df[dist_to_max_col]
+                    ) / range_col.clip(lower=self.eps)
+                    
+                    if meta_usage:
+                        metadata_dict[dist_to_min_col] = {
+                            'operation': 'distance_to_min',
+                            'base_column': c,
+                            'type': 'distance',
+                            'formula': f'{c} - min({c})',
+                            'transformer': 'GroupAggregationFeatures'
+                        }
+                        metadata_dict[dist_to_max_col] = {
+                            'operation': 'distance_to_max',
+                            'base_column': c,
+                            'type': 'distance',
+                            'formula': f'max({c}) - {c}',
+                            'transformer': 'GroupAggregationFeatures'
+                        }
+                        metadata_dict[nearest_boundary_col] = {
+                            'operation': 'nearest_boundary',
+                            'base_column': c,
+                            'type': 'distance',
+                            'formula': 'min(c - min, max - c) / (max - min)',
+                            'transformer': 'GroupAggregationFeatures'
+                        }
+                        if c not in feature_lineage_dict:
+                            feature_lineage_dict[c] = []
+                        feature_lineage_dict[c].extend([dist_to_min_col, dist_to_max_col, nearest_boundary_col])
         
         # Добавление рангов
         if self.add_rank:
             for c in self.numeric_cols:
                 rank_col = f"rank_{c}"
-                df[rank_col] = df.groupby(self.group_cols)[c].rank()
+                df[rank_col] = df.groupby(self.group_cols)[c].rank(pct=False)
+                
+                # Процентный ранг
+                pct_rank_col = f"pct_rank_{c}"
+                df[pct_rank_col] = df.groupby(self.group_cols)[c].rank(pct=True)
                 
                 if meta_usage:
                     metadata_dict[rank_col] = {
@@ -160,30 +370,85 @@ class GroupAggregationFeatures(AutoFETBase):
                         'method': 'average',
                         'transformer': 'GroupAggregationFeatures'
                     }
-                    
+                    metadata_dict[pct_rank_col] = {
+                        'operation': 'percentile_rank',
+                        'base_column': c,
+                        'type': 'ranking',
+                        'group_cols': self.group_cols,
+                        'transformer': 'GroupAggregationFeatures'
+                    }
                     if c not in feature_lineage_dict:
                         feature_lineage_dict[c] = []
-                    feature_lineage_dict[c].append(rank_col)
+                    feature_lineage_dict[c].extend([rank_col, pct_rank_col])
+        
+        # Добавление кумулятивных признаков
+        if self.add_cumulative:
+            for c in self.numeric_cols:
+                # Кумулятивная сумма внутри группы (требует сортировки)
+                df = df.sort_values(self.group_cols + [c])
+                cumsum_col = f"cumsum_{c}"
+                df[cumsum_col] = df.groupby(self.group_cols)[c].cumsum()
+                
+                # Кумулятивный процент
+                cumsum_total = df.groupby(self.group_cols)[c].transform('sum')
+                cumsum_pct_col = f"cumsum_pct_{c}"
+                df[cumsum_pct_col] = FeatureUtils.safe_divide(df[cumsum_col], cumsum_total, self.eps)
+                
+                if meta_usage:
+                    metadata_dict[cumsum_col] = {
+                        'operation': 'cumulative_sum',
+                        'base_column': c,
+                        'type': 'cumulative',
+                        'group_cols': self.group_cols,
+                        'transformer': 'GroupAggregationFeatures'
+                    }
+                    metadata_dict[cumsum_pct_col] = {
+                        'operation': 'cumulative_percentage',
+                        'base_column': c,
+                        'type': 'cumulative',
+                        'group_cols': self.group_cols,
+                        'transformer': 'GroupAggregationFeatures'
+                    }
+                    if c not in feature_lineage_dict:
+                        feature_lineage_dict[c] = []
+                    feature_lineage_dict[c].extend([cumsum_col, cumsum_pct_col])
         
         # Сохраняем список сгенерированных признаков
         self.generated_features_ = [c for c in df.columns if c not in X.columns]
         
         if meta_usage:
-            # Attach metadata as attributes to the DataFrame
-            # Note: This might still raise warnings but will work
             df.metadata = metadata_dict
             df.feature_lineage = feature_lineage_dict
             
-            # Добавляем дополнительную статистику по метаданным
+            # Подсчет статистики по типам признаков
+            type_counts = {
+                'aggregation': 0,
+                'deviation': 0,
+                'normalization': 0,
+                'proportion': 0,
+                'distance': 0,
+                'ranking': 0,
+                'cumulative': 0,
+                'auxiliary': 0
+            }
+            
+            for v in metadata_dict.values():
+                feat_type = v.get('type', 'unknown')
+                if feat_type in type_counts:
+                    type_counts[feat_type] += 1
+                else:
+                    type_counts['auxiliary'] += 1
+            
             df.metadata_stats = {
                 'total_features_generated': len(self.generated_features_),
-                'aggregation_features': sum(1 for v in metadata_dict.values() if v.get('type') == 'aggregation'),
-                'deviation_features': sum(1 for v in metadata_dict.values() if v.get('type') == 'deviation'),
-                'ranking_features': sum(1 for v in metadata_dict.values() if v.get('type') == 'ranking'),
+                'type_distribution': type_counts,
+                'total_base_aggregations': len(self.aggs) * len(self.numeric_cols),
+                'deviation_features_generated': sum(1 for t in self.deviation_types if t != 'zscore' or self.add_zscore),
                 'timestamp': pd.Timestamp.now()
             }
         
         return df
+
 
 
 class StatisticalFeatureGenerator(AutoFETBase):

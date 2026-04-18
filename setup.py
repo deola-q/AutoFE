@@ -6,8 +6,8 @@ def readme():
     return Path("README.md").read_text(encoding="utf-8")
 
 setup(
-    name="autofe-vsu-project",
-    version="0.0.3",
+    name="autofe-grass",
+    version="0.0.1",
     author="Daria Palchikova",
     author_email="daria.palchikova@gmail.com",
     license="MIT",

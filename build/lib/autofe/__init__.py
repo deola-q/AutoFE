@@ -1,3 +1,3 @@
-from .generators import AggregationFeatureGenerator
+from .stats import GroupAggregationFeatures, StatisticalFeatureGenerator, FeatureSelector
 
-__all__ = ["AggregationFeatureGenerator"]
+__all__ = ["GroupAggregationFeatures", "StatisticalFeatureGenerator", "FeatureSelector"]    
