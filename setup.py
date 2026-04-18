@@ -7,7 +7,7 @@ def readme():
 
 setup(
     name="autofe-grass",
-    version="0.0.1",
+    version="0.0.4",
     author="Daria Palchikova",
     author_email="daria.palchikova@gmail.com",
     license="MIT",
