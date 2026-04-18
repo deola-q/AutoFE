@@ -52,7 +52,7 @@ X_train_stats = stat_features.transform(X_train_grouped, meta_usage=True)
 ```
 
 ## Learn more
-Usage examples: [!notebooks](https://github.com/deola-q/AutoFE/tree/4a68d8049083b571c559f1d226a0a5128730e9fc/notebooks)
+Usage examples: [notebooks](https://github.com/deola-q/AutoFE/tree/dc4b0e21bb1a143bae1a73dadc5f99d441c0bfbe/notebooks)
 
 ## Key Features
 
