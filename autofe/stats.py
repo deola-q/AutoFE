@@ -42,7 +42,14 @@ class GroupAggregationFeatures(AutoFETBase):
     ]
     
     # Доступные типы отклонений
-    DEVIATION_TYPES = ["diff", "ratio", "zscore", "normalized", "proportion", "distance_to_boundary"]
+    DEVIATION_TYPES = [
+        "diff", 
+        "ratio", 
+        "zscore", 
+        "normalized", 
+        "proportion", 
+        "distance_to_boundary"
+        ]
     
     def __init__(
         self,
@@ -59,7 +66,7 @@ class GroupAggregationFeatures(AutoFETBase):
         add_rank: bool = False,
         add_cumulative: bool = False,                       # кумулятивные суммы/проценты
         handle_infinity: str = "clip",                      # "clip", "drop", "fillna"
-        eps: float = 1e-10,                                 # для защиты от деления на ноль
+        eps: float = 1e-10,                                 
     ):
         self.numeric_cols = numeric_cols
         self.group_cols = group_cols
@@ -164,7 +171,7 @@ class GroupAggregationFeatures(AutoFETBase):
                 if col_name in df.columns:
                     available_aggs[agg] = col_name
             
-            # 1. Разности (diff)
+            # Разности (diff)
             if "diff" in self.deviation_types:
                 for base_agg in self.deviation_base_cols:
                     if base_agg not in available_aggs:
@@ -193,7 +200,7 @@ class GroupAggregationFeatures(AutoFETBase):
                             feature_lineage_dict[c] = []
                         feature_lineage_dict[c].append(diff_col)
             
-            # 2. Отношения (ratio)
+            # Отношения (ratio)
             if "ratio" in self.deviation_types:
                 for base_agg in self.ratio_base_cols:
                     if base_agg not in available_aggs:
@@ -221,7 +228,7 @@ class GroupAggregationFeatures(AutoFETBase):
                             feature_lineage_dict[c] = []
                         feature_lineage_dict[c].append(ratio_col)
             
-            # 3. Z-score (стандартизованное отклонение)
+            # Z-score
             if "zscore" in self.deviation_types:
                 if "mean" in available_aggs and "std" in available_aggs:
                     mean_col = available_aggs["mean"]
@@ -246,7 +253,7 @@ class GroupAggregationFeatures(AutoFETBase):
                             feature_lineage_dict[c] = []
                         feature_lineage_dict[c].append(zscore_col)
             
-            # 4. Нормализованное значение в группе (0-1)
+            # Нормализованное значение в группе (0-1)
             if "normalized" in self.deviation_types:
                 if "min" in available_aggs and "max" in available_aggs:
                     min_col = available_aggs["min"]
@@ -281,14 +288,13 @@ class GroupAggregationFeatures(AutoFETBase):
                             feature_lineage_dict[c] = []
                         feature_lineage_dict[c].extend([normalized_col, range_col])
             
-            # 5. Доля от суммы по группе
+            # Доля от суммы по группе
             if "proportion" in self.deviation_types:
                 if "sum" in available_aggs:
                     sum_col = available_aggs["sum"]
                     proportion_col = f"proportion_{c}"
                     df[proportion_col] = FeatureUtils.safe_divide(df[c], df[sum_col], self.eps)
                     
-                    # Доля должна быть в [0, 1]
                     df[proportion_col] = df[proportion_col].clip(0, 1)
                     
                     if meta_usage:
@@ -303,7 +309,7 @@ class GroupAggregationFeatures(AutoFETBase):
                             feature_lineage_dict[c] = []
                         feature_lineage_dict[c].append(proportion_col)
             
-            # 6. Расстояние до границ (min и max)
+            # Расстояние до границ (min и max)
             if "distance_to_boundary" in self.deviation_types:
                 if "min" in available_aggs and "max" in available_aggs:
                     min_col = available_aggs["min"]
@@ -317,7 +323,6 @@ class GroupAggregationFeatures(AutoFETBase):
                     dist_to_max_col = f"dist_to_max_{c}"
                     df[dist_to_max_col] = df[max_col] - df[c]
                     
-                    # Относительное расстояние до ближайшей границы
                     range_col = df[max_col] - df[min_col]
                     nearest_boundary_col = f"nearest_boundary_{c}"
                     df[nearest_boundary_col] = np.minimum(
@@ -382,14 +387,13 @@ class GroupAggregationFeatures(AutoFETBase):
                     feature_lineage_dict[c].extend([rank_col, pct_rank_col])
         
         # Добавление кумулятивных признаков
+        # TODO: продумать другую логику / убрать
         if self.add_cumulative:
             for c in self.numeric_cols:
-                # Кумулятивная сумма внутри группы (требует сортировки)
                 df = df.sort_values(self.group_cols + [c])
                 cumsum_col = f"cumsum_{c}"
                 df[cumsum_col] = df.groupby(self.group_cols)[c].cumsum()
                 
-                # Кумулятивный процент
                 cumsum_total = df.groupby(self.group_cols)[c].transform('sum')
                 cumsum_pct_col = f"cumsum_pct_{c}"
                 df[cumsum_pct_col] = FeatureUtils.safe_divide(df[cumsum_col], cumsum_total, self.eps)
@@ -413,7 +417,7 @@ class GroupAggregationFeatures(AutoFETBase):
                         feature_lineage_dict[c] = []
                     feature_lineage_dict[c].extend([cumsum_col, cumsum_pct_col])
         
-        # Сохраняем список сгенерированных признаков
+
         self.generated_features_ = [c for c in df.columns if c not in X.columns]
         
         if meta_usage:
@@ -494,32 +498,28 @@ class StatisticalFeatureGenerator(AutoFETBase):
         X_base = X.copy()
         X_new = self._make_features(X_base)
         
-        # Generate metadata if requested
+
         metadata_dict = {}
         feature_lineage_dict = {}
         
         if meta_usage:
-            # Generate metadata for all generated features
             for col in X_new.columns:
                 metadata_dict[col] = self._get_feature_metadata(col, X_base)
                 
-                # Track lineage for base columns
                 base_cols = self._get_base_columns(col)
                 for base_col in base_cols:
                     if base_col not in feature_lineage_dict:
                         feature_lineage_dict[base_col] = []
                     feature_lineage_dict[base_col].append(col)
         
-        # Select only the best features
         selected_new = X_new[self.selected_]
         result = pd.concat([X_base, selected_new], axis=1)
         
         if meta_usage:
-            # Attach metadata as attributes
+
             object.__setattr__(result, 'metadata', metadata_dict)
             object.__setattr__(result, 'feature_lineage', feature_lineage_dict)
             
-            # Add metadata statistics
             object.__setattr__(result, 'metadata_stats', {
                 'total_features_generated': len(X_new.columns),
                 'selected_features': len(self.selected_),
@@ -535,7 +535,7 @@ class StatisticalFeatureGenerator(AutoFETBase):
         X_new = pd.DataFrame(index=X.index)
         cols = self.cols_
 
-        # Unary operations
+
         for c in cols:
             x = X[c]
 
@@ -544,7 +544,6 @@ class StatisticalFeatureGenerator(AutoFETBase):
             if "sqrt" in self.unary:
                 X_new[f"sqrt_{c}"] = FeatureUtils.safe_sqrt(x)
 
-        # Pairwise operations
         for i in range(len(cols)):
             for j in range(i+1, len(cols)):
                 a, b = cols[i], cols[j]
@@ -566,9 +565,9 @@ class StatisticalFeatureGenerator(AutoFETBase):
             'transformer': 'StatisticalFeatureGenerator'
         }
         
-        # Check if it's a unary feature
+
         if self._is_unary_feature(feature_name):
-            parts = feature_name.split('_', 1)  # Split only on first underscore
+            parts = feature_name.split('_', 1) 
             operation = parts[0]
             base_col = parts[1]
             metadata.update({
@@ -578,26 +577,22 @@ class StatisticalFeatureGenerator(AutoFETBase):
                 'formula': f"{operation}({base_col})"
             })
         
-        # Check if it's a pairwise feature
+ъ
         elif self._is_pairwise_feature(feature_name):
             # Find the operation (first part)
             parts = feature_name.split('_', 1)
             operation = parts[0]
             rest = parts[1]
             
-            # Now need to split the rest into two column names
-            # We need to find where the first column ends and second begins
-            # Strategy: try all possible splits and check if both parts are in cols_
+           
             possible_splits = []
             for i in range(1, len(rest)):
                 col1_candidate = rest[:i]
-                col2_candidate = rest[i+1:]  # +1 to skip the underscore
+                col2_candidate = rest[i+1:]  
                 
-                # Check if both candidates are in the list of columns
                 if col1_candidate in self.cols_ and col2_candidate in self.cols_:
                     possible_splits.append((col1_candidate, col2_candidate))
             
-            # Use the first valid split (should be unambiguous if column names don't contain underscores)
             if possible_splits:
                 col1, col2 = possible_splits[0]
                 metadata.update({
@@ -607,7 +602,7 @@ class StatisticalFeatureGenerator(AutoFETBase):
                     'formula': f"{col1} {self._get_operator_symbol(operation)} {col2}"
                 })
             else:
-                # Fallback: store raw name
+
                 metadata.update({
                     'type': 'pairwise',
                     'operation': operation,
@@ -636,7 +631,6 @@ class StatisticalFeatureGenerator(AutoFETBase):
         if self._is_unary_feature(feature_name):
             return [feature_name.split('_', 1)[1]]
         elif self._is_pairwise_feature(feature_name):
-            # Try to parse pairwise columns
             parts = feature_name.split('_', 1)
             if len(parts) == 2:
                 rest = parts[1]

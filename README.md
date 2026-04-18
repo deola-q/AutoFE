@@ -1,9 +1,11 @@
 # AutoFEAT
 
-### Framework for automated feature generation based on statistics and AI tools
+### The framework for automatically generating features with metadata to improve explainability
 
 [![PyPI version](https://badge.fury.io/py/autofe-vsu-project.svg)](https://pypi.org/project/autofe-grass/)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+
+..in development..
 
 ## Installation
 
@@ -41,6 +43,12 @@ stat_gen = StatisticalFeatureGenerator(
         min_var=1e-5
     )
 X_train_stats = stat_features.fit_transform(X_train_grouped, y_train)
+```
+
+The ```transform``` method allows you to view the meaning of any generated feature by using ```meta_usage=True``` flag (default value is False)
+
+```python
+X_train_stats = stat_features.transform(X_train_grouped, meta_usage=True)
 ```
 
 ## Learn more
