@@ -577,7 +577,6 @@ class StatisticalFeatureGenerator(AutoFETBase):
                 'formula': f"{operation}({base_col})"
             })
         
-ъ
         elif self._is_pairwise_feature(feature_name):
             # Find the operation (first part)
             parts = feature_name.split('_', 1)
