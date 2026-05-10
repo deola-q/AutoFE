@@ -118,6 +118,7 @@ class GroupAggregationFeatures(AutoFETBase):
         FeatureUtils.check_columns(X, self.numeric_cols + self.group_cols)
         
         self.stats_ = {}
+        # сейчас группировка идет сразу по всем признакам, продумать другую логику
         grouped = X.groupby(self.group_cols)
         
         for agg in self.aggs:
